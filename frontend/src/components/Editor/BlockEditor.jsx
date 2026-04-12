@@ -8,12 +8,53 @@ import FontFamily from '@tiptap/extension-font-family'
 import TextStyle from '@tiptap/extension-text-style'
 import { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
-
 const MenuBar = ({ editor }) => {
-  if (!editor) return null;
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  const handleAIAutoComplete = async () => {
+    // Get text from the current selection
+    const { state } = editor;
+    const { from, to } = state.selection;
+    let contextText = state.doc.textBetween(Math.max(0, from - 100), to, ' ');
+
+    if (!contextText.trim()) {
+      contextText = "General continuation";
+    }
+
+    setIsAiLoading(true);
+    try {
+      // In a real app, this hitting an OpenAI gateway. We are hitting our mocked Express route.
+      const backendUrl = import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:3001/api/v1";
+      const res = await fetch(`${backendUrl}/ai/autocomplete`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem("token")}`
+        },
+        body: JSON.stringify({ context: contextText })
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        editor.chain().focus().insertContent(data.text).run();
+      }
+    } catch (err) {
+      console.error("AI Generation failed", err);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-2 p-2 mb-4 border border-border rounded-lg bg-muted/30 sticky top-0 z-10 backdrop-blur-sm">
+      <button
+        onClick={handleAIAutoComplete}
+        disabled={isAiLoading}
+        className="px-2 py-1 rounded text-sm font-bold bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20 transition-colors flex items-center border border-indigo-500/20"
+      >
+        {isAiLoading ? "✨ Thinking..." : "✨ AI Copilot"}
+      </button>
+      <div className="w-px h-4 bg-border mx-1" />
       <button
         onClick={() => editor.chain().focus().toggleBold().run()}
         disabled={!editor.can().chain().focus().toggleBold().run()}

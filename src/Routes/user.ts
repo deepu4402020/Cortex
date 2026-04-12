@@ -6,6 +6,8 @@ import Content from "../models/contentModel";
 import ContentHistory from "../models/contentHistoryModel";
 import APIKey from "../models/apiKeyModel";
 import { authenticate, authenticateApiKey } from "../middleware";
+import backgroundQueue from "../utils/queue";
+import { redisCache } from "../utils/cache";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_local_dev";
@@ -88,8 +90,19 @@ router.get("/notes", requireAuth, async (req: any, res: any) => {
 
     if (tag) query.tags = tag;
 
+    const cacheKey = `notes_list_${req.user.id}_${tag || 'all'}_${role || 'all'}`;
+    const cachedData = redisCache.get(cacheKey);
+    if (cachedData) {
+      console.log(`[Cache Hit] Redis-Served Notes List for ${req.user.id}`);
+      return res.status(200).json({ notes: cachedData, source: "cache" });
+    }
+
     const notes = await Content.find(query).sort({ updatedAt: -1 });
-    res.status(200).json({ notes });
+    
+    redisCache.set(cacheKey, notes, 300); // Cache for 5 mins
+    console.log(`[Cache Miss] DB-Served Notes List for ${req.user.id}`);
+    
+    res.status(200).json({ notes, source: "database" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -114,6 +127,9 @@ router.post("/notes", requireAuth, async (req: any, res: any) => {
     const { title, content, tags } = req.body;
     const newNote = new Content({ userId: req.user.id, title: title || "Untitled Note", content: content || "", tags: tags || [] });
     await newNote.save();
+    
+    redisCache.invalidate(`notes_list_${req.user.id}`); // Clear Cache on Mutate
+    
     res.status(201).json({ success: true, note: newNote });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -157,16 +173,18 @@ router.put("/notes/:id", requireAuth, async (req: any, res: any) => {
     const updatedNote = await Content.findByIdAndUpdate(req.params.id, updateData, { new: true });
     
     if (updatedNote) {
-      // Save Version Ledger!
-      const history = new ContentHistory({
+      // Save Version Ledger asynchronously using Message Queue architecture
+      backgroundQueue.emit("SAVE_HISTORY", {
         noteId: updatedNote._id,
-        savedBy: req.user.id,
+        userId: req.user.id,
         title: updatedNote.title,
         content: updatedNote.content,
         version: updatedNote.__v
       });
-      await history.save();
     }
+
+    redisCache.invalidate(`notes_list_${req.user.id}`); // Clear cache on update
+    redisCache.invalidate(`note_${req.params.id}`);
 
     res.status(200).json({ success: true, note: updatedNote });
   } catch (err: any) {
@@ -203,6 +221,30 @@ router.get("/brain/:shareLink", async (req: any, res: any) => {
     const note = await Content.findOne({ _id: req.params.shareLink, isPublic: true });
     if (!note) return res.status(404).json({ error: "Not public" });
     res.status(200).json({ success: true, data: note });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- AI COPILOT / LLM MOCK ---
+router.post("/ai/autocomplete", requireAuth, async (req: any, res: any) => {
+  try {
+    const { context } = req.body;
+    if (!context) return res.status(400).json({ error: "Context required for AI" });
+
+    // Simulate LLM Network Latency
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Mock generative text extension
+    const mockedGenerations = [
+      " This fundamentally improves architectural scalability.",
+      " Furthermore, leveraging asynchronous queues decouples latency.",
+      " Research shows Redis caching can drop baseline latency by 40%.",
+      " Additionally, a strict microservice implementation reduces monolithic failure."
+    ];
+    const generatedText = mockedGenerations[Math.floor(Math.random() * mockedGenerations.length)];
+
+    res.status(200).json({ success: true, text: generatedText });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
