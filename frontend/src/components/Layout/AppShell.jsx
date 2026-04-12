@@ -18,9 +18,12 @@ export function AppShell() {
     }
   }, [navigate, location.pathname]);
 
+  const [filterRole, setFilterRole] = useState("all");
+
   const fetchNotes = useCallback(async () => {
     try {
-      const res = await api.get("/notes");
+      const endpoint = filterRole === "all" ? "/notes" : `/notes?role=${filterRole}`;
+      const res = await api.get(endpoint);
       if (res.data.notes) {
         setNotes(res.data.notes);
       }
@@ -33,7 +36,7 @@ export function AppShell() {
     } finally {
       setIsLoading(false);
     }
-  }, [navigate]);
+  }, [navigate, filterRole]);
 
   useEffect(() => {
     if (localStorage.getItem("token")) {

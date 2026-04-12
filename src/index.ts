@@ -3,20 +3,28 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
+import rateLimit from "express-rate-limit";
 import connectDB from "./db";
 import User from "./Routes/user";
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "*", // Keep it simple for dev, usually domain specific
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
+// Protect against DDOS and brute force!
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests from this IP, please try again after 15 minutes" }
+});
+
+app.use(limiter);
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: "10mb" })); // Increased limit for base64 images
+app.use(express.json({ limit: "10mb" }));
 app.use("/api/v1", User);
 
 // Socket.io for Real-Time Collaboration
