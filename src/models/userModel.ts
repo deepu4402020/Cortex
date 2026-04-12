@@ -4,9 +4,13 @@ import { Schema, model } from "mongoose";
 
 const UserSchema = new Schema({
   user_name: {
-    type: String, //string would be our Type script type not valid as runtime value
+    type: String,
     required: true,
     maxLength: 50,
+  },
+  email: {
+    type: String,
+    required: true,
     unique: true,
   },
   password: {

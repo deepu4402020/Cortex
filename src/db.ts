@@ -1,18 +1,24 @@
-//Database logic here
-//create user models nad schemas
-import dotenv from "dotenv";
-dotenv.config();
 import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI as string);
-    //why "as string" not :String ?
+    const uri =
+      process.env.MONGO_URI ??
+      process.env.MONGODB_URI ??
+      process.env.DATABASE_URL;
+
+    if (typeof uri !== "string" || uri.trim().length === 0) {
+      throw new Error(
+        "Missing MongoDB connection string. Set `MONGO_URI` (or `MONGODB_URI` / `DATABASE_URL`) in your environment."
+      );
+    }
+
+    await mongoose.connect(uri);
     console.log("MongoDB Connected");
   } catch (error) {
     console.error("MongoDB connection failed:", error);
     process.exit(1);
-  }
+  } 
 };
 
 export default connectDB;

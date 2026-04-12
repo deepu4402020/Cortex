@@ -1,16 +1,22 @@
 import jwt from "jsonwebtoken";
 
-// all the middlewares
+// Use environment variable or default for fallback
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_local_dev";
 
 export const authenticate = (req: any, res: any, next: any) => {
-  const token = req.header("Authorization")?.replace("Bearer ", "");
-  if (!token) return res.status(401).json({ error: "Access denied" });
-
   try {
-    const verified = jwt.verify(token, "your_jwt_secret");
-    req.user = verified;
+    const authHeader = req.header("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Access denied. No token provided." });
+    }
+
+    const token = authHeader.replace("Bearer ", "");
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // Attach the decoded payload (e.g., { id: "..." }) to req.user
+    req.user = decoded;
     next();
   } catch (err) {
-    res.status(400).json({ error: "Invalid token" });
+    res.status(401).json({ error: "Invalid token." });
   }
 };

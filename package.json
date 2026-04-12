@@ -30,6 +30,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.17.0",
     "mongoose": "^8.15.1",
+    "socket.io": "^4.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "typescipt": "^1.0.0",

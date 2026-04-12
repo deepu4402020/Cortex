@@ -1,127 +1,100 @@
-//iske ander app.post put get wagera nhi aaega only Router.post iput delete .....
-
 import express from "express";
-const router = express.Router();
+import jwt from "jsonwebtoken";
 import User from "../models/userModel";
 import Content from "../models/contentModel";
-import { AnyBulkWriteOperation } from "mongoose";
-//Routes
+import { authenticate } from "../middleware";
 
-//CRUD Operation
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_local_dev";
 
-//why using post req for signing
-router.post("/signin", async (req: any, res: any) => {
+// --- AUTHENTICATION ---
+
+router.post("/signup", async (req: any, res: any) => {
   try {
-    const { user_name, password } = req.body;
-    const user_Data = await User.findOne({ user_name });
-    if (!user_Data) return res.json({ error: "No user found" });
-    const corr_Password = user_Data.password;
-    if (password != corr_Password) {
-      return res.status(401).json({ error: "Incorrect credentials" });
+    const { user_name, email, password } = req.body;
+    if (!user_name || !email || !password) {
+      return res.status(400).json({ error: "Username, email, and password are required" });
     }
 
-    //For now just consoleing
-    res.json({
-      success: true,
-      message: "Access granted",
-      username: user_Data.user_name,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-router.post("/signup", async (req, res: any) => {
-  console.log("received signup");
-  try {
-    const { user_name, password } = req.body;
-
-    // Validate input
-    if (!user_name || !password) {
-      return res
-        .status(400)
-        .json({ error: "Username and password are required" });
-    }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ user_name });
+    const existingUser = await User.findOne({ $or: [{ user_name }, { email }] });
     if (existingUser) {
-      return res.status(409).json({ error: "Username already exists" });
+      return res.status(409).json({ error: "Username or email already exists" });
     }
 
-    // Create new user
-    const new_User = new User({ user_name, password });
+    const new_User = new User({ user_name, email, password }); 
     await new_User.save();
 
-    console.log("saved", new_User);
-    res.status(200).json({
-      success: true,
-      message: "User created successfully",
+    // Create a Welcome Note automatically
+    const welcomeNote = new Content({
+      userId: new_User._id,
+      title: "Welcome to Second Brain!",
+      content: "<p>This is your personal workspace. Start typing or use <strong>/</strong> to see formatting commands.</p><ul><li><p>Try making a list</p></li><li><p>Try dragging an image</p></li></ul>",
     });
+    await welcomeNote.save();
+
+    res.status(200).json({ success: true, message: "User created successfully" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post("/content", async (req, res) => {
-  const { content } = req.body;
+router.post("/signin", async (req: any, res: any) => {
   try {
-    const updated_Content = new Content({ content });
-    await updated_Content.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Content saved successfully",
-      data: updated_Content,
+    const { user_name, password } = req.body; // we can keep user_name login for simplicity, or allow email
+    const user_Data = await User.findOne({ 
+      $or: [{ user_name: user_name }, { email: user_name }] 
     });
-  } catch (err: any) {
-    res.status(400).json({
-      error: err.message,
-    });
-  }
-});
-
-router.post("/brain/:shareLink", async (req, res: any) => {
-  try {
-    const { shareLink } = req.params;
-    const content = await Content.findById(shareLink);
-    if (!content) {
-      return res.status(404).json({ error: "Content not found" });
-    }
-    res.status(200).json({
-      success: true,
-      data: content,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post("/users", async (req, res: any) => {
-  try {
-    const { user_name, password } = req.body;
-    const user_Data = await User.findOne({ user_name });
-    if (!user_Data) return res.status(404).json({ error: "User not found" });
-
-    const corr_Password = user_Data.password;
-    if (password !== corr_Password) {
+    
+    if (!user_Data || user_Data.password !== password) {
       return res.status(401).json({ error: "Incorrect credentials" });
     }
 
-    const userContent = await Content.find({ userId: user_Data._id });
-    res.status(200).json({
-      success: true,
-      message: "Content retrieved successfully",
-      data: userContent,
-    });
+    const token = jwt.sign(
+      { id: user_Data._id, username: user_Data.user_name, email: user_Data.email }, 
+      JWT_SECRET, 
+      { expiresIn: "7d" }
+    );
+    res.json({ success: true, token, username: user_Data.user_name, email: user_Data.email });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Fetch all notes
-router.get("/notes", async (req, res) => {
+router.get("/users/is-logged", authenticate, (req: any, res: any) => {
+  res.status(200).json({ success: true, username: req.user.username, email: req.user.email, message: "Logged in" });
+});
+
+// --- NOTES (Authenticated) ---
+
+// Get all notes for the user (owned OR shared)
+router.get("/notes", authenticate, async (req: any, res: any) => {
   try {
-    const notes = await Content.find();
+    const notes = await Content.find({
+      $or: [
+        { userId: req.user.id },
+        { "sharedWith.email": req.user.email }
+      ]
+    }).sort({ updatedAt: -1 });
+    res.status(200).json({ notes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Search functionality via MongoDB text index
+router.get("/notes/search", authenticate, async (req: any, res: any) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ error: "Query parameter 'q' is required" });
+
+    const notes = await Content.find(
+      { 
+        $or: [{ userId: req.user.id }, { "sharedWith.email": req.user.email }],
+        $text: { $search: String(q) } 
+      },
+      { score: { $meta: "textScore" } }
+    ).sort({ score: { $meta: "textScore" } });
+    
     res.status(200).json({ notes });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -129,98 +102,88 @@ router.get("/notes", async (req, res) => {
 });
 
 // Add a new note
-router.post("/notes", async (req, res: any) => {
+router.post("/notes", authenticate, async (req: any, res: any) => {
   try {
-    const { title, content } = req.body;
-    const newNote = new Content({ title, content });
+    const { title, content, tags } = req.body;
+    const newNote = new Content({
+      userId: req.user.id,
+      title: title || "Untitled Note",
+      content: content || "",
+      tags: tags || []
+    });
     await newNote.save();
-    res.status(201).json({
-      success: true,
-      note: newNote,
-    });
+    res.status(201).json({ success: true, note: newNote });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get a single note by ID
-router.get("/notes/:id", async (req, res: any) => {
+// Get a single note (check ownership or access)
+router.get("/notes/:id", authenticate, async (req: any, res: any) => {
   try {
-    const { id } = req.params;
-    const note = await Content.findById(id);
-    if (!note) {
-      return res.status(404).json({ error: "Note not found" });
+    const note = await Content.findOne({ 
+      _id: req.params.id, 
+      $or: [{ userId: req.user.id }, { "sharedWith.email": req.user.email }]
+    });
+    if (!note) return res.status(404).json({ error: "Note not found or no access permission" });
+    
+    const isOwner = note.userId.toString() === req.user.id;
+    const sharedRecord = note.sharedWith.find((s:any) => s.email === req.user.email);
+    const role = isOwner ? 'owner' : (sharedRecord ? sharedRecord.role : 'viewer');
+
+    res.status(200).json({ note, role });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update a note (must be owner or editor)
+router.put("/notes/:id", authenticate, async (req: any, res: any) => {
+  try {
+    const { title, content, tags, sharedWith, isPublic } = req.body;
+    
+    // First, fetch the note to check permissions
+    const note = await Content.findOne({ _id: req.params.id });
+    if (!note) return res.status(404).json({ error: "Note not found" });
+
+    const isOwner = note.userId.toString() === req.user.id;
+    const isEditor = note.sharedWith.some((s:any) => s.email === req.user.email && s.role === 'editor');
+
+    if (!isOwner && !isEditor) {
+      return res.status(403).json({ error: "You only have view access to this note" });
     }
-    res.status(200).json({ note });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-// Update a note
-router.put("/notes/:id", async (req, res: any) => {
-  try {
-    const { id } = req.params;
-    const { title, content } = req.body;
-    const updatedNote = await Content.findByIdAndUpdate(
-      id,
-      { title, content },
-      { new: true }
-    );
-    if (!updatedNote) {
-      return res.status(404).json({ error: "Note not found" });
+    // Only owners can change permissions (sharedWith, isPublic)
+    const updateData: any = { title, content, tags };
+    if (isOwner) {
+      if (sharedWith !== undefined) updateData.sharedWith = sharedWith;
+      if (isPublic !== undefined) updateData.isPublic = isPublic;
     }
-    res.status(200).json({
-      success: true,
-      note: updatedNote,
-      message: "Note updated successfully",
-    });
+
+    const updatedNote = await Content.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    res.status(200).json({ success: true, note: updatedNote });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete a note
-router.delete("/notes/:id", async (req, res: any) => {
+// Delete a note (only owner!)
+router.delete("/notes/:id", authenticate, async (req: any, res: any) => {
   try {
-    const { id } = req.params;
-    const deletedNote = await Content.findByIdAndDelete(id);
-    if (!deletedNote) {
-      return res.status(404).json({ error: "Note not found" });
-    }
-    res.status(200).json({
-      success: true,
-      message: "Note deleted successfully",
-    });
+    const deletedNote = await Content.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    if (!deletedNote) return res.status(403).json({ error: "Only the owner can delete this note." });
+    res.status(200).json({ success: true, message: "Note deleted successfully" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Check if user is logged in
-router.get("/users/is-logged", async (req, res: any) => {
+// Public share link endpoint (doesn't require auth)
+router.get("/brain/:shareLink", async (req: any, res: any) => {
   try {
-    // For now, we'll return a mock response since we don't have session management
-    // In a real application, you would check the session/token here
-    res.status(200).json({
-      success: true,
-      username: "demo_user", // This should come from session/token
-      message: "User is logged in",
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Logout endpoint
-router.get("/users/logout", async (req, res: any) => {
-  try {
-    // For now, we'll return a success response
-    // In a real application, you would clear the session/token here
-    res.status(200).json({
-      success: true,
-      message: "Logged out successfully",
-    });
+    const note = await Content.findOne({ _id: req.params.shareLink, isPublic: true });
+    if (!note) return res.status(404).json({ error: "Content not found or not public" });
+    res.status(200).json({ success: true, data: note });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

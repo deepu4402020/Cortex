@@ -1,100 +1,104 @@
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
-import { AuthContext } from "../AuthContext";
+import api from "../utils/api";
 
 const Register = () => {
-  // State Variables
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [hint, setHint] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  // Initialize navigate (v6+)
   const navigate = useNavigate();
 
-  const { isLoggedIn, setIsLoggedIn } = useContext(AuthContext);
-
-  // TODO: CHECK IF USER IS LOGGED IN ALREADY
   useEffect(() => {
-    if (isLoggedIn) navigate("/");
-  }, [isLoggedIn]);
+    if (localStorage.getItem("token")) {
+      navigate("/p/welcome");
+    }
+  }, [navigate]);
 
-  // Functions
-  const handleSubmit = () => {
-    // console.log(username, email, password);
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault();
+    setIsLoading(true);
+    setError("");
 
-    const url = `${import.meta.env.VITE_BACKEND_BASE_URL}/signup`;
-    const body = { user_name: username, password };
-    const headers = { "Content-Type": "application/json" };
-    // console.log(body);
-
-    // POST user data to /signup on backend
-    axios
-      .post(url, body, { headers })
-      .then((res) => {
-        if (res.data.success) {
-          setHint(res.data.message);
-          navigate("/login");
-        }
-      })
-      .catch((err) => {
-        // console.log(err.response.data);
-        if (err.response?.data?.error) {
-          setHint(err.response.data.error);
-        } else {
-          setHint("User validation failed. Input valid credentials");
-        }
-      });
+    try {
+      const res = await api.post("/signup", { user_name: username, email, password });
+      if (res.data.success) {
+        // Automatically route them to login
+        navigate("/login");
+      }
+    } catch (err) {
+      if (err.response?.data?.error) {
+        setError(err.response.data.error);
+      } else {
+        setError("Error creating account");
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-dark-900 text-white font-sans flex items-center justify-center bg-pattern">
-      <div className="glass-effect rounded-2xl p-8 shadow-soft w-11/12 sm:w-9/12 md:w-7/12 lg:w-5/12">
-        <div className="mb-6">
-          <h1 className="text-4xl font-bold">It's our pleasure to have you here.</h1>
-          <p className="capitalize text-2xl mt-3 text-gray-300">Let's register you!</p>
-        </div>
+    <div className="min-h-screen bg-background text-foreground flex items-center justify-center font-sans">
+      <div className="w-full max-w-md p-8 md:p-10 border border-border shadow-minimal rounded-xl bg-background">
+        <h1 className="text-3xl font-bold tracking-tight mb-2">Create Account</h1>
+        <p className="text-muted-foreground text-sm mb-8">Start organizing your digital life.</p>
 
-        {hint && (
-          <p className="w-full text-center mb-4 text-base text-gray-200">{hint}</p>
+        {error && (
+          <div className="mb-4 p-3 rounded bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
+            {error}
+          </div>
         )}
 
-        <div className="space-y-3">
-          <input
-            type="text"
-            className="input-modern w-full"
-            placeholder="Username"
-            autoComplete="off"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            type="email"
-            className="input-modern w-full"
-            placeholder="Email"
-            autoComplete="off"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            type="password"
-            className="input-modern w-full"
-            placeholder="Password"
-            autoComplete="off"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Email</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 bg-transparent border border-border rounded focus:outline-none focus:ring-1 focus:ring-foreground transition-shadow"
+              placeholder="you@example.com"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Username</label>
+            <input
+              type="text"
+              required
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-3 py-2 bg-transparent border border-border rounded focus:outline-none focus:ring-1 focus:ring-foreground transition-shadow"
+              placeholder="Choose a username"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Password</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 bg-transparent border border-border rounded focus:outline-none focus:ring-1 focus:ring-foreground transition-shadow"
+              placeholder="••••••••"
+            />
+          </div>
 
-        <button className="btn-primary w-full mt-5" onClick={handleSubmit}>
-          Submit
-        </button>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full mt-6 py-2 px-4 bg-foreground text-background font-medium rounded hover:bg-foreground/90 transition-colors disabled:opacity-50"
+          >
+            {isLoading ? "Creating..." : "Create Account"}
+          </button>
+        </form>
 
-        <p className="text-center text-gray-300 mt-3">
-          Have an account already?&nbsp;
-          <Link to="/login" className="underline text-primary-400 hover:text-primary-300">
-            Login to your account
+        <p className="text-center text-sm text-muted-foreground mt-8">
+          Already have an account?{" "}
+          <Link to="/login" className="text-foreground underline hover:text-foreground/80">
+            Sign in
           </Link>
         </p>
       </div>
