@@ -4,6 +4,7 @@ import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
 import rateLimit from "express-rate-limit";
+import mongoose from "mongoose";
 import connectDB from "./db";
 import User from "./Routes/user";
 import jwt from "jsonwebtoken";
