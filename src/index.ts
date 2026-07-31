@@ -50,7 +50,12 @@ const limiter = rateLimit({
   // If Redis dies, let traffic through instead of failing closed and taking down the API.
   passOnStoreError: true,
   store: new RedisStore({
-    sendCommand: async (...args: string[]) => pubClient.call(args[0], ...args.slice(1)) as any,
+    sendCommand: async (...args: string[]) => {
+      if (pubClient.status !== "ready") {
+        throw new Error("Redis not ready");
+      }
+      return pubClient.call(args[0], ...args.slice(1)) as any;
+    },
   }),
   message: { error: "Too many requests from this IP, please try again after 15 minutes" }
 });
