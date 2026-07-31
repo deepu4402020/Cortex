@@ -63,6 +63,19 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
 app.use("/api/v1", User);
 
+app.get("/api/v1/health", (req: any, res: any) => {
+  res.json({
+    status: "ok",
+    mongo: mongoose.connection.readyState === 1 ? "connected" : `disconnected (state ${mongoose.connection.readyState})`,
+    redis: pubClient.status,
+    env: {
+      hasMongoUri: !!(process.env.MONGO_URI || process.env.MONGODB_URI || process.env.DATABASE_URL),
+      hasRedisUrl: !!process.env.REDIS_URL,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+    }
+  });
+});
+
 // Socket.io for Real-Time Collaboration
 io.use((socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.headers.token;
