@@ -25,44 +25,57 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const REDIS_URL = process.env.REDIS_URL;
 
-// Redis clients for Socket.io Pub/Sub and Rate Limiting
-const pubClient = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: 3,
-  enableOfflineQueue: false,
-});
-const subClient = pubClient.duplicate();
+// Redis is optional: only create clients when REDIS_URL is explicitly provided.
+// Without Redis, the app falls back to in-memory rate limiting and socket.io adapter.
+let pubClient: Redis | null = null;
+let subClient: Redis | null = null;
 
-pubClient.on("error", (err) => {
-  console.error("[Redis PubClient Error] (Rate Limiter / Socket.io may be degraded):", err);
-});
-subClient.on("error", (err) => {
-  console.error("[Redis SubClient Error]:", err);
-});
+if (REDIS_URL) {
+  console.log("[Redis] REDIS_URL detected, enabling Redis-backed rate limiting and Socket.io adapter.");
+  pubClient = new Redis(REDIS_URL, {
+    maxRetriesPerRequest: 3,
+    enableOfflineQueue: false,
+  });
+  subClient = pubClient.duplicate();
 
-// Protect against DDOS and brute force! (Now horizontally scalable via Redis)
-const limiter = rateLimit({
+  pubClient.on("error", (err) => {
+    console.error("[Redis PubClient Error] (Rate Limiter / Socket.io may be degraded):", err);
+  });
+  subClient.on("error", (err) => {
+    console.error("[Redis SubClient Error]:", err);
+  });
+
+  // Configure Socket.io with Redis Adapter for horizontal scaling
+  io.adapter(createAdapter(pubClient, subClient));
+} else {
+  console.log("[Redis] No REDIS_URL set. Using in-memory rate limiting and default Socket.io adapter.");
+}
+
+// Protect against DDOS and brute force!
+const rateLimitOptions: any = {
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
-  // Deliberate availability-over-strict-enforcement tradeoff:
-  // If Redis dies, let traffic through instead of failing closed and taking down the API.
-  passOnStoreError: true,
-  store: new RedisStore({
+  message: { error: "Too many requests from this IP, please try again after 15 minutes" }
+};
+
+// Use Redis-backed store when available, otherwise default in-memory store
+if (pubClient) {
+  rateLimitOptions.passOnStoreError = true;
+  rateLimitOptions.store = new RedisStore({
     sendCommand: async (...args: string[]) => {
-      if (pubClient.status !== "ready") {
+      if (pubClient!.status !== "ready") {
         throw new Error("Redis not ready");
       }
-      return pubClient.call(args[0], ...args.slice(1)) as any;
+      return pubClient!.call(args[0], ...args.slice(1)) as any;
     },
-  }),
-  message: { error: "Too many requests from this IP, please try again after 15 minutes" }
-});
+  });
+}
 
-// Configure Socket.io with Redis Adapter for horizontal scaling
-io.adapter(createAdapter(pubClient, subClient));
+const limiter = rateLimit(rateLimitOptions);
 
 app.use(limiter);
 app.use(cors({ origin: true, credentials: true }));
@@ -73,7 +86,7 @@ app.get("/api/v1/health", (req: any, res: any) => {
   res.json({
     status: "ok",
     mongo: mongoose.connection.readyState === 1 ? "connected" : `disconnected (state ${mongoose.connection.readyState})`,
-    redis: pubClient.status,
+    redis: pubClient ? pubClient.status : "not configured",
     env: {
       hasMongoUri: !!(process.env.MONGO_URI || process.env.MONGODB_URI || process.env.DATABASE_URL),
       hasRedisUrl: !!process.env.REDIS_URL,
