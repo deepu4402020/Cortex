@@ -99,18 +99,15 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 3001;
 
 async function start() {
-  await connectDB();
-  
-  // Start the background job worker only after DB is connected
-  startWorker();
-  
-  // Listen on process.env.PORT for Render/cloud platforms
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`Server is UP on port ${PORT}`);
+    try {
+      await connectDB();
+      startWorker();
+    } catch (err) {
+      console.error("Async startup error:", err);
+    }
   });
 }
 
-start().catch((err) => {
-  console.error("Fatal startup error:", err);
-  process.exit(1);
-});
+start();
