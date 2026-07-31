@@ -171,7 +171,11 @@ const BlockEditor = ({ content, onChange, editable = true, noteId }) => {
       ? import.meta.env.VITE_BACKEND_BASE_URL.replace('/api/v1', '') 
       : "http://localhost:3001";
       
-    socketRef.current = io(backendUrl);
+    socketRef.current = io(backendUrl, {
+      auth: {
+        token: localStorage.getItem("token")
+      }
+    });
 
     socketRef.current.on("connect", () => {
       socketRef.current.emit("join-note", noteId);

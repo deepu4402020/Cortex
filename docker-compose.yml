@@ -11,6 +11,14 @@ services:
     networks:
       - app-network
 
+  redis:
+    image: redis:alpine
+    container_name: second-brain-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+
   backend:
     build: 
       context: .
@@ -21,8 +29,10 @@ services:
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/secondbrain
       - JWT_SECRET=production_secret_key_here
+      - REDIS_URL=redis://redis:6379
     depends_on:
       - mongodb
+      - redis
     networks:
       - app-network
 

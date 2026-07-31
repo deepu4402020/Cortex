@@ -5,8 +5,9 @@ import User from "../models/userModel";
 import Content from "../models/contentModel";
 import ContentHistory from "../models/contentHistoryModel";
 import APIKey from "../models/apiKeyModel";
+import bcrypt from "bcrypt";
 import { authenticate, authenticateApiKey } from "../middleware";
-import backgroundQueue from "../utils/queue";
+import { addJob } from "../utils/queue";
 import { redisCache } from "../utils/cache";
 
 const router = express.Router();
@@ -29,7 +30,8 @@ router.post("/signup", async (req: any, res: any) => {
     const existingUser = await User.findOne({ $or: [{ user_name }, { email }] });
     if (existingUser) return res.status(409).json({ error: "Username or email exists" });
 
-    const new_User = new User({ user_name, email, password }); 
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const new_User = new User({ user_name, email, password: hashedPassword }); 
     await new_User.save();
 
     const welcomeNote = new Content({
@@ -49,7 +51,10 @@ router.post("/signin", async (req: any, res: any) => {
   try {
     const { user_name, password } = req.body;
     const user_Data = await User.findOne({ $or: [{ user_name: user_name }, { email: user_name }] });
-    if (!user_Data || user_Data.password !== password) return res.status(401).json({ error: "Invalid credentials" });
+    if (!user_Data) return res.status(401).json({ error: "Invalid credentials" });
+    
+    const isMatch = await bcrypt.compare(password, user_Data.password);
+    if (!isMatch) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = jwt.sign({ id: user_Data._id, username: user_Data.user_name, email: user_Data.email }, JWT_SECRET, { expiresIn: "7d" });
     res.json({ success: true, token, username: user_Data.user_name, email: user_Data.email });
@@ -91,7 +96,7 @@ router.get("/notes", requireAuth, async (req: any, res: any) => {
     if (tag) query.tags = tag;
 
     const cacheKey = `notes_list_${req.user.id}_${tag || 'all'}_${role || 'all'}`;
-    const cachedData = redisCache.get(cacheKey);
+    const cachedData = await redisCache.get(cacheKey);
     if (cachedData) {
       console.log(`[Cache Hit] Redis-Served Notes List for ${req.user.id}`);
       return res.status(200).json({ notes: cachedData, source: "cache" });
@@ -99,7 +104,7 @@ router.get("/notes", requireAuth, async (req: any, res: any) => {
 
     const notes = await Content.find(query).sort({ updatedAt: -1 });
     
-    redisCache.set(cacheKey, notes, 300); // Cache for 5 mins
+    await redisCache.set(cacheKey, notes, 300); // Cache for 5 mins
     console.log(`[Cache Miss] DB-Served Notes List for ${req.user.id}`);
     
     res.status(200).json({ notes, source: "database" });
@@ -128,7 +133,7 @@ router.post("/notes", requireAuth, async (req: any, res: any) => {
     const newNote = new Content({ userId: req.user.id, title: title || "Untitled Note", content: content || "", tags: tags || [] });
     await newNote.save();
     
-    redisCache.invalidate(`notes_list_${req.user.id}`); // Clear Cache on Mutate
+    await redisCache.invalidate(`notes_list_${req.user.id}`); // Clear Cache on Mutate
     
     res.status(201).json({ success: true, note: newNote });
   } catch (err: any) {
@@ -174,7 +179,7 @@ router.put("/notes/:id", requireAuth, async (req: any, res: any) => {
     
     if (updatedNote) {
       // Save Version Ledger asynchronously using Message Queue architecture
-      backgroundQueue.emit("SAVE_HISTORY", {
+      await addJob("SAVE_HISTORY", {
         noteId: updatedNote._id,
         userId: req.user.id,
         title: updatedNote.title,
@@ -183,8 +188,8 @@ router.put("/notes/:id", requireAuth, async (req: any, res: any) => {
       });
     }
 
-    redisCache.invalidate(`notes_list_${req.user.id}`); // Clear cache on update
-    redisCache.invalidate(`note_${req.params.id}`);
+    await redisCache.invalidate(`notes_list_${req.user.id}`); // Clear cache on update
+    await redisCache.invalidate(`note_${req.params.id}`);
 
     res.status(200).json({ success: true, note: updatedNote });
   } catch (err: any) {
@@ -210,6 +215,8 @@ router.delete("/notes/:id", requireAuth, async (req: any, res: any) => {
   try {
     const deletedNote = await Content.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
     if (!deletedNote) return res.status(403).json({ error: "Only owner can delete" });
+    await redisCache.invalidate(`notes_list_${req.user.id}`);
+    await redisCache.invalidate(`note_${req.params.id}`);
     res.status(200).json({ success: true, message: "Deleted" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

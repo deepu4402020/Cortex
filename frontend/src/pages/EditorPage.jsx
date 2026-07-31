@@ -56,6 +56,13 @@ export default function EditorPage() {
     if (pageId && pageId !== "welcome") {
       fetchNote();
       setShowHistory(false);
+    } else if (pageId === "welcome") {
+      setNoteData({
+        title: "Welcome to your Second Brain",
+        content: "<p>Select a note from the sidebar or create a new one to get started.</p>"
+      });
+      setRole("owner");
+      setIsLoading(false);
     } else {
       setIsLoading(false);
     }
@@ -161,7 +168,7 @@ export default function EditorPage() {
              <FiClock className="w-4 h-4" />
           </button>
 
-          {role === 'owner' && (
+          {role === 'owner' && pageId !== 'welcome' && (
             <>
               <button onClick={handleShareEmail} className="text-xs font-semibold px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded">
                 Share...

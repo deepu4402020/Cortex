@@ -16,11 +16,20 @@ const UserSchema = new Schema({
   password: {
     type: String,
     required: true,
+    select: false,
   },
   createdAt: {
     type: Date,
     default: Date.now,
   },
+}, {
+  toJSON: {
+    transform: function (doc, ret) {
+      delete ret.password;
+      delete ret.__v;
+      return ret;
+    }
+  }
 });
 
 const UserModel = model("User", UserSchema);
