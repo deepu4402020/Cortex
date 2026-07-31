@@ -28,7 +28,10 @@ const io = new Server(server, {
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
 // Redis clients for Socket.io Pub/Sub and Rate Limiting
-const pubClient = new Redis(REDIS_URL);
+const pubClient = new Redis(REDIS_URL, {
+  maxRetriesPerRequest: 3,
+  enableOfflineQueue: false,
+});
 const subClient = pubClient.duplicate();
 
 pubClient.on("error", (err) => {
@@ -93,15 +96,17 @@ io.on("connection", (socket) => {
   });
 });
 
+const PORT = process.env.PORT || 3001;
+
 async function start() {
   await connectDB();
   
   // Start the background job worker only after DB is connected
   startWorker();
   
-  // Listen on the HTTP server, not the Express app directly!
-  server.listen(3001, () => {
-    console.log("Server is UP on port 3001");
+  // Listen on process.env.PORT for Render/cloud platforms
+  server.listen(PORT, () => {
+    console.log(`Server is UP on port ${PORT}`);
   });
 }
 

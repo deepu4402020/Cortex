@@ -1,7 +1,10 @@
 import Redis from "ioredis";
 
 // Use REDIS_URL from env or fallback to localhost for development
-const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
+  maxRetriesPerRequest: 3,
+  enableOfflineQueue: false,
+});
 
 redisClient.on("error", (err) => {
   console.error("[Redis Error]:", err);
