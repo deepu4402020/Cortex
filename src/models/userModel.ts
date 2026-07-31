@@ -6,6 +6,7 @@ const UserSchema = new Schema({
   user_name: {
     type: String,
     required: true,
+    unique: true,
     maxLength: 50,
   },
   email: {
